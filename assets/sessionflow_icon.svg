@@ -1,0 +1,26 @@
+<svg width="200" height="200" viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#8e6fd9"/>
+      <stop offset="100%" stop-color="#4a3a73"/>
+    </linearGradient>
+    <linearGradient id="noteGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#fdf3e3"/>
+      <stop offset="100%" stop-color="#f0c97a"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="200" height="200" rx="44" fill="url(#bgGrad)"/>
+
+  <!-- Music note (double eighth note) -->
+  <g>
+    <!-- beam -->
+    <path d="M78 54 L142 40 L142 60 L78 74 Z" fill="url(#noteGrad)"/>
+    <!-- stems -->
+    <rect x="134" y="46" width="8" height="78" rx="3" fill="url(#noteGrad)"/>
+    <rect x="70" y="60" width="8" height="78" rx="3" fill="url(#noteGrad)"/>
+    <!-- note heads -->
+    <ellipse cx="60" cy="142" rx="20" ry="15" fill="url(#noteGrad)" transform="rotate(-12 60 142)"/>
+    <ellipse cx="124" cy="128" rx="20" ry="15" fill="url(#noteGrad)" transform="rotate(-12 124 128)"/>
+  </g>
+</svg>
