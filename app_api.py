@@ -1,3 +1,7 @@
+from dotenv import load_dotenv
+load_dotenv()
+
+
 from fastapi import FastAPI
 from pydantic import BaseModel
 from typing import List
@@ -5,6 +9,8 @@ import torch
 import torch.nn as nn
 import joblib
 import numpy as np
+
+
 
 import redis
 import json
@@ -199,6 +205,30 @@ def predict_from_session(session_id: str, candidate: CandidateTrack):
         "history_tracks_used": actual_length,
         "was_padded": was_padded,
     }
+
+from spotipy.oauth2 import SpotifyOAuth
+
+spotify_auth_manager = SpotifyOAuth(scope="streaming user-read-email user-read-private")
+
+@app.get("/spotify/token")
+def get_spotify_token():
+    token_info = spotify_auth_manager.get_cached_token()
+    if not token_info:
+        return {"error": "no cached token, run manual auth flow first"}
+
+    # Refresh if expired
+    if spotify_auth_manager.is_token_expired(token_info):
+        token_info = spotify_auth_manager.refresh_access_token(token_info['refresh_token'])
+
+    return {"access_token": token_info['access_token']}
+
+
+
+
+
+
+
+
 
 
 

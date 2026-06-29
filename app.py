@@ -1,6 +1,52 @@
 import streamlit as st
 import base64
 
+from dotenv import load_dotenv
+load_dotenv()
+
+
+import requests
+
+API_BASE = "http://127.0.0.1:8000"
+
+if 'session_id' not in st.session_state:
+    st.session_state.session_id = "streamlit_session_1"
+    try:
+        requests.post(f"{API_BASE}/session/start", params={"session_id": st.session_state.session_id})
+    except Exception as e:
+        st.error(f"Could not connect to backend: {e}")
+
+import pandas as pd
+
+@st.cache_data
+def load_demo_tracks():
+    df = pd.read_csv('data/cleaned_tracks.csv')
+    # Sample 30 random tracks once, reused for this demo session
+    return df.sample(30, random_state=1).reset_index(drop=True)
+
+demo_tracks = load_demo_tracks()
+
+import spotipy
+from spotipy.oauth2 import SpotifyOAuth
+
+@st.cache_resource
+def get_spotify_client():
+    return spotipy.Spotify(auth_manager=SpotifyOAuth(scope="playlist-read-private"))
+
+sp = get_spotify_client()
+
+@st.cache_data
+def get_album_art(track_id):
+    try:
+        track = sp.track(track_id)
+        images = track['album']['images']
+        return images[1]['url'] if len(images) > 1 else images[0]['url']  # medium size (300px)
+    except Exception:
+        return None  # fallback to gradient if lookup fails
+
+
+
+
 def load_icon_b64(path):
     with open(path, "rb") as f:
         return base64.b64encode(f.read()).decode()
@@ -325,24 +371,56 @@ st.markdown(f"""
 """, unsafe_allow_html=True)
 
 # ---------- Dummy Data ----------
-recently_played = [
-    {"name": "Track Title 1", "artist": "Artist Name 1", "time": "1 min ago", "bpm": 128, "energy": "High Energy", "tag_class": "tag-high",
-     "gradient": "linear-gradient(135deg, #2c3e50, #4a235a)"},
-    {"name": "Track Title 2", "artist": "Artist Name 2", "time": "5 min ago", "bpm": 110, "energy": "Medium Energy", "tag_class": "tag-medium",
-     "gradient": "linear-gradient(135deg, #1b4f72, #117864)"},
-    {"name": "Track Title 3", "artist": "Artist Name 3", "time": "10 min ago", "bpm": 140, "energy": "Very High Energy", "tag_class": "tag-veryhigh",
-     "gradient": "linear-gradient(135deg, #7b241c, #1b2631)"},
-    {"name": "Track Title 4", "artist": "Artist Name 4", "time": "15 min ago", "bpm": 95, "energy": "Low Energy", "tag_class": "tag-low",
-     "gradient": "linear-gradient(135deg, #512e5f, #2c3e50)"},
-    {"name": "Track Title 5", "artist": "Artist Name 5", "time": "20 min ago", "bpm": 120, "energy": "Medium Energy", "tag_class": "tag-medium",
-     "gradient": "linear-gradient(135deg, #154360, #0e6251)"},
-]
+recently_played = []
+for i in range(5):
+    track = demo_tracks.iloc[i]
+    energy_level = "High Energy" if track['energy'] > 0.66 else "Medium Energy" if track['energy'] > 0.33 else "Low Energy"
+    tag_class = "tag-high" if track['energy'] > 0.66 else "tag-medium" if track['energy'] > 0.33 else "tag-low"
 
-skip_probability = 88
-model_confidence = 91
-last_skipped_track = "Starlight Wave"
-last_skip_reason = "High Energy"
-user_genre_pref = "Electronic"
+    art_url = get_album_art(track['track_id'])
+
+    recently_played.append({
+        "name": track['track_name'],
+        "artist": track['artists'],
+        "time": f"{(i+1)*5} min ago",
+        "bpm": round(track['tempo']),
+        "energy": energy_level,
+        "tag_class": tag_class,
+        "art_url": art_url,
+    })
+
+# Use the 6th demo track as the "candidate" (next track to predict)
+candidate_track = demo_tracks.iloc[5]
+
+try:
+    response = requests.post(
+        f"{API_BASE}/predict_from_session",
+        params={"session_id": st.session_state.session_id},
+        json={
+            "energy": candidate_track['energy'],
+            "tempo": candidate_track['tempo'],
+            "danceability": candidate_track['danceability'],
+            "valence": candidate_track['valence'],
+            "loudness": candidate_track['loudness'],
+        }
+    )
+    result = response.json()
+    skip_probability = round(result.get('skip_probability', 0) * 100)
+    history_used = result.get('history_tracks_used', 0)
+    was_padded = result.get('was_padded', True)
+except Exception as e:
+    skip_probability = 0
+    history_used = 0
+    was_padded = True
+    st.error(f"Prediction failed: {e}")
+
+model_confidence = "N/A"  # your model doesn't currently output a separate confidence score
+last_skipped_track = recently_played[0]['name'] if recently_played else "N/A"
+last_skip_reason = recently_played[0]['energy'] if recently_played else "N/A"
+user_genre_pref = "N/A"  # not tracked by your current model
+
+
+
 
 # ---------- Layout ----------
 left_col, right_col = st.columns([1, 1], gap="medium")
@@ -350,9 +428,14 @@ left_col, right_col = st.columns([1, 1], gap="medium")
 with left_col:
     track_cards_html = ""
     for t in recently_played:
+        if t.get("art_url"):
+            thumb_html = f'<img src="{t["art_url"]}" style="width:46px;height:46px;border-radius:8px;object-fit:cover;flex-shrink:0;" />'
+        else:
+            thumb_html = '<div class="track-thumb" style="background: linear-gradient(135deg, #2c3e50, #4a235a);"></div>'
+
         track_cards_html += (
             '<div class="track-card">'
-            f'<div class="track-thumb" style="background: {t["gradient"]};"></div>'
+            f'{thumb_html}'
             '<div class="track-info">'
             f'<p class="track-name">{t["name"]}</p>'
             f'<p class="track-artist">{t["artist"]}</p>'
@@ -391,13 +474,19 @@ with right_col:
         '<rect x="6" y="5" width="4" height="14" rx="1"/>'
         '<rect x="14" y="5" width="4" height="14" rx="1"/></svg>'
     )
+    candidate_art = get_album_art(candidate_track['track_id'])
+
+    if candidate_art:
+        album_art_html = f'<img src="{candidate_art}" style="width:100%;height:100%;object-fit:cover;border-radius:10px;" />'
+    else:
+        album_art_html = ''
 
     now_playing_html = (
         '<div class="now-playing-card">'
         '<div class="now-playing-label">CURRENT TRACK (AI PREDICTION)</div>'
-        '<div class="album-art">'
-        '<div class="album-text-top">LUNA VEIL</div>'
-        '<div class="album-text-bottom">COSMIC DRIFT</div>'
+        f'<div class="album-art" style="background:none;">{album_art_html}'
+        f'<div class="album-text-top">{candidate_track["track_name"]}</div>'
+        f'<div class="album-text-bottom">{candidate_track["artists"]}</div>'
         '</div>'
         '<div class="progress-track"><div class="progress-fill"></div></div>'
         '<div class="player-controls">'
@@ -409,7 +498,6 @@ with right_col:
     )
     st.markdown(now_playing_html, unsafe_allow_html=True)
 
-    # Donut ring math (SVG stroke-dasharray trick)
     radius = 54
     circumference = 2 * 3.14159 * radius
     filled = circumference * (skip_probability / 100)
@@ -427,7 +515,6 @@ with right_col:
         f'</svg>'
     )
 
-    # Entire metrics card built as ONE string, ONE markdown call — avoids the split-block HTML leak bug
     metrics_card_html = (
         '<div class="metrics-card">'
         '<div class="metrics-title">PREDICTION METRICS</div>'
