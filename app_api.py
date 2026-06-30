@@ -17,12 +17,19 @@ import json
 
 redis_client = redis.Redis(host='localhost', port=6379, decode_responses=True)
 
-
-
-
-
-
 app = FastAPI(title="SessionFlow AI - Skip Predictor")
+
+from fastapi.middleware.cors import CORSMiddleware
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:8080", "http://127.0.0.1:8080", "http://localhost:8501", "http://127.0.0.1:8501"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+
 
 # ---- Model definition (must match training exactly) ----
 class SkipLSTMv2(nn.Module):

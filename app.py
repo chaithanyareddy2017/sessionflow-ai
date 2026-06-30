@@ -498,6 +498,97 @@ with right_col:
     )
     st.markdown(now_playing_html, unsafe_allow_html=True)
 
+import streamlit.components.v1 as components
+
+spotify_player_html = """
+<div id="spotify-status" style="font-family: Arial, sans-serif; font-size: 0.85rem; color: #4a3a73; padding: 8px 0;">
+    Loading Spotify player...
+</div>
+<button id="activateBtn" disabled style="
+    font-size: 0.85rem; padding: 8px 16px; border-radius: 8px; border: none;
+    background: #4a3a73; color: white; cursor: pointer; margin-bottom: 8px;">
+    Activate Player
+</button>
+<div>
+    <button id="prevBtn" disabled>⏮</button>
+    <button id="playPauseBtn" disabled>⏯</button>
+    <button id="nextBtn" disabled>⏭</button>
+</div>
+
+<script src="https://sdk.scdn.co/spotify-player.js"></script>
+<script>
+    let player = null;
+
+    window.onSpotifyWebPlaybackSDKReady = () => {
+        document.getElementById('spotify-status').innerText = "Fetching token...";
+
+        fetch('http://127.0.0.1:8000/spotify/token')
+            .then(res => res.json())
+            .then(data => {
+                const token = data.access_token;
+                if (!token) {
+                    document.getElementById('spotify-status').innerText = "No token received.";
+                    return;
+                }
+
+                player = new Spotify.Player({
+                    name: 'SessionFlow AI Player',
+                    getOAuthToken: cb => { cb(token); },
+                    volume: 0.5
+                });
+
+                player.addListener('ready', ({ device_id }) => {
+                    document.getElementById('spotify-status').innerText =
+                        "Ready. Click Activate, then select 'SessionFlow AI Player' in Spotify.";
+                    document.getElementById('activateBtn').disabled = false;
+                });
+
+                player.addListener('not_ready', () => {
+                    document.getElementById('spotify-status').innerText = "Player offline.";
+                });
+
+                player.addListener('player_state_changed', (state) => {
+                    if (!state) return;
+                    const track = state.track_window.current_track;
+                    document.getElementById('spotify-status').innerText =
+                        track.name + " — " + track.artists.map(a => a.name).join(', ') +
+                        (state.paused ? " (paused)" : " (playing)");
+                    document.getElementById('prevBtn').disabled = false;
+                    document.getElementById('playPauseBtn').disabled = false;
+                    document.getElementById('nextBtn').disabled = false;
+                });
+
+                player.addListener('authentication_error', ({ message }) => {
+                    document.getElementById('spotify-status').innerText = "Auth error: " + message;
+                });
+
+                player.addListener('account_error', ({ message }) => {
+                    document.getElementById('spotify-status').innerText = "Account error: " + message;
+                });
+
+                player.connect();
+            });
+    };
+
+    document.getElementById('activateBtn').onclick = () => {
+        if (player) {
+            player.activateElement();
+            document.getElementById('spotify-status').innerText =
+                "Activated! Now select 'SessionFlow AI Player' in Spotify.";
+        }
+    };
+
+    document.getElementById('prevBtn').onclick = () => { if (player) player.previousTrack(); };
+    document.getElementById('playPauseBtn').onclick = () => { if (player) player.togglePlay(); };
+    document.getElementById('nextBtn').onclick = () => { if (player) player.nextTrack(); };
+</script>
+"""
+
+with right_col:
+    components.html(spotify_player_html, height=140)
+
+
+
     radius = 54
     circumference = 2 * 3.14159 * radius
     filled = circumference * (skip_probability / 100)

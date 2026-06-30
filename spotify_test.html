@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Spotify SDK Test</title>
+    <style>
+        body { font-family: Arial, sans-serif; padding: 24px; }
+        #status { font-size: 1.05rem; margin-bottom: 16px; }
+        button {
+            font-size: 1rem;
+            padding: 10px 18px;
+            border-radius: 8px;
+            border: none;
+            background: #4a3a73;
+            color: white;
+            cursor: pointer;
+        }
+        button:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+    </style>
+</head>
+<body>
+    <h1>Spotify Web Playback SDK Test</h1>
+    <p id="status">Loading SDK...</p>
+    <button id="activateBtn" disabled>Activate Player (click me first!)</button>
+
+    <script src="https://sdk.scdn.co/spotify-player.js"></script>
+    <script>
+        let player = null;
+
+        window.onSpotifyWebPlaybackSDKReady = () => {
+            document.getElementById('status').innerText = "SDK loaded. Fetching token...";
+
+            fetch('http://127.0.0.1:8000/spotify/token')
+                .then(res => res.json())
+                .then(data => {
+                    const token = data.access_token;
+
+                    if (!token) {
+                        document.getElementById('status').innerText =
+                            "No token returned from backend. Check FastAPI /spotify/token endpoint.";
+                        return;
+                    }
+
+                    document.getElementById('status').innerText = "Token received. Connecting player...";
+
+                    player = new Spotify.Player({
+                        name: 'SessionFlow AI Test Player',
+                        getOAuthToken: cb => { cb(token); },
+                        volume: 0.5
+                    });
+
+                    player.addListener('ready', ({ device_id }) => {
+                        document.getElementById('status').innerText =
+                            "Player ready! Device ID: " + device_id +
+                            " — Click 'Activate Player' below FIRST, then select " +
+                            "'SessionFlow AI Test Player' in Spotify's Connect devices list.";
+                        document.getElementById('activateBtn').disabled = false;
+                    });
+
+                    player.addListener('not_ready', ({ device_id }) => {
+                        document.getElementById('status').innerText = "Device went offline: " + device_id;
+                        document.getElementById('activateBtn').disabled = true;
+                    });
+
+                    player.addListener('initialization_error', ({ message }) => {
+                        document.getElementById('status').innerText = "Init error: " + message;
+                    });
+
+                    player.addListener('authentication_error', ({ message }) => {
+                        document.getElementById('status').innerText = "Auth error: " + message;
+                    });
+
+                    player.addListener('account_error', ({ message }) => {
+                        document.getElementById('status').innerText =
+                            "Account error (Premium required): " + message;
+                    });
+
+                    // Fires whenever playback state changes (track change, play/pause, transfer, etc.)
+                    player.addListener('player_state_changed', (state) => {
+                        if (!state) {
+                            document.getElementById('status').innerText =
+                                "Player state changed: no active playback.";
+                            return;
+                        }
+                        const track = state.track_window.current_track;
+                        document.getElementById('status').innerText =
+                            "Now playing: " + track.name + " — " + track.artists.map(a => a.name).join(', ') +
+                            (state.paused ? " (paused)" : " (playing)");
+                    });
+
+                    player.connect();
+                })
+                .catch(err => {
+                    document.getElementById('status').innerText = "Failed to fetch token: " + err;
+                });
+        };
+
+        // CRITICAL: Browsers block audio that isn't triggered by a direct user click.
+        // Spotify's transfer-from-app command looks like a server-initiated autoplay
+        // to the browser, so it gets silently blocked unless activateElement() was
+        // already called from a real click first. This button satisfies that requirement.
+        document.getElementById('activateBtn').onclick = () => {
+            if (player) {
+                player.activateElement();
+                document.getElementById('status').innerText =
+                    "Player activated! Now open Spotify and select 'SessionFlow AI Test Player' " +
+                    "from the Connect devices list, then play a song.";
+            }
+        };
+    </script>
+</body>
+</html>
