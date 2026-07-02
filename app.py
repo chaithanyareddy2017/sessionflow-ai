@@ -1,5 +1,6 @@
 import streamlit as st
 import base64
+import streamlit.components.v1 as components
 
 from dotenv import load_dotenv
 load_dotenv()
@@ -24,17 +25,6 @@ def load_demo_tracks():
     # Sample 30 random tracks once, reused for this demo session
     return df.sample(30, random_state=1).reset_index(drop=True)
 
-demo_tracks = load_demo_tracks()
-
-import spotipy
-from spotipy.oauth2 import SpotifyOAuth
-
-@st.cache_resource
-def get_spotify_client():
-    return spotipy.Spotify(auth_manager=SpotifyOAuth(scope="playlist-read-private"))
-
-sp = get_spotify_client()
-
 @st.cache_data
 def get_album_art(track_id):
     try:
@@ -44,6 +34,51 @@ def get_album_art(track_id):
     except Exception:
         return None  # fallback to gradient if lookup fails
 
+
+
+demo_tracks = load_demo_tracks()
+
+
+if 'played_history' not in st.session_state:
+    # Start with your original 5 demo tracks
+    st.session_state.played_history = []
+    for i in range(5):
+        track = demo_tracks.iloc[i]
+        st.session_state.played_history.append({
+            "track_id": track['track_id'],
+            "track_name": track['track_name'],
+            "artists": track['artists'],
+            "energy": track['energy'],
+            "tempo": track['tempo'],
+            "danceability": track['danceability'],
+            "valence": track['valence'],
+            "loudness": track['loudness'],
+            "art_url": get_album_art(track['track_id']),  # fetch once at init
+        })
+
+if 'current_playing' not in st.session_state:
+    st.session_state.current_playing = st.session_state.played_history[0]
+
+def play_random_next_track():
+    response = requests.get(f"{API_BASE}/random_track")
+    new_track = response.json()
+    new_track['art_url'] = get_album_art(new_track['track_id'])
+    st.session_state.played_history.insert(0, new_track)
+    if len(st.session_state.played_history) > 5:
+        st.session_state.played_history = st.session_state.played_history[:5]
+    st.session_state.current_playing = new_track
+    st.session_state.trigger_play_uri = f"spotify:track:{new_track['track_id']}"
+    
+
+
+import spotipy
+from spotipy.oauth2 import SpotifyOAuth
+
+@st.cache_resource
+def get_spotify_client():
+    return spotipy.Spotify(auth_manager=SpotifyOAuth(scope="playlist-read-private"))
+
+sp = get_spotify_client()
 
 
 
@@ -82,34 +117,6 @@ st.markdown("""
         letter-spacing: 0.5px;
         color: #1a1a2e;
         margin-bottom: 1rem;
-    }
-
-    /* Left panel cream background — explicit wrapper, not Streamlit internals */
-    .left-panel-wrap {
-        background-color: #fdf3e3;
-        border-radius: 18px;
-        padding: 20px;
-        height: 100%;
-        box-sizing: border-box;
-    }
-
-    /* Force the full Streamlit column flex chain to stretch so left-panel-wrap can fill height */
-    div[data-testid="stHorizontalBlock"] {
-        align-items: stretch;
-    }
-    div[data-testid="stHorizontalBlock"] > div[data-testid="column"] {
-        display: flex;
-        flex-direction: column;
-    }
-    div[data-testid="stHorizontalBlock"] > div[data-testid="column"] > div {
-        flex: 1;
-        display: flex;
-        flex-direction: column;
-    }
-    div[data-testid="stHorizontalBlock"] > div[data-testid="column"] > div > div {
-        flex: 1;
-        display: flex;
-        flex-direction: column;
     }
 
     .track-card {
@@ -390,34 +397,25 @@ for i in range(5):
     })
 
 # Use the 6th demo track as the "candidate" (next track to predict)
-candidate_track = demo_tracks.iloc[5]
+current = st.session_state.current_playing
 
 try:
     response = requests.post(
         f"{API_BASE}/predict_from_session",
         params={"session_id": st.session_state.session_id},
         json={
-            "energy": candidate_track['energy'],
-            "tempo": candidate_track['tempo'],
-            "danceability": candidate_track['danceability'],
-            "valence": candidate_track['valence'],
-            "loudness": candidate_track['loudness'],
+            "energy": current['energy'],
+            "tempo": current['tempo'],
+            "danceability": current['danceability'],
+            "valence": current['valence'],
+            "loudness": current['loudness'],
         }
     )
     result = response.json()
     skip_probability = round(result.get('skip_probability', 0) * 100)
-    history_used = result.get('history_tracks_used', 0)
-    was_padded = result.get('was_padded', True)
 except Exception as e:
     skip_probability = 0
-    history_used = 0
-    was_padded = True
     st.error(f"Prediction failed: {e}")
-
-model_confidence = "N/A"  # your model doesn't currently output a separate confidence score
-last_skipped_track = recently_played[0]['name'] if recently_played else "N/A"
-last_skip_reason = recently_played[0]['energy'] if recently_played else "N/A"
-user_genre_pref = "N/A"  # not tracked by your current model
 
 
 
@@ -426,166 +424,181 @@ user_genre_pref = "N/A"  # not tracked by your current model
 left_col, right_col = st.columns([1, 1], gap="medium")
 
 with left_col:
-    track_cards_html = ""
-    for t in recently_played:
-        if t.get("art_url"):
-            thumb_html = f'<img src="{t["art_url"]}" style="width:46px;height:46px;border-radius:8px;object-fit:cover;flex-shrink:0;" />'
-        else:
-            thumb_html = '<div class="track-thumb" style="background: linear-gradient(135deg, #2c3e50, #4a235a);"></div>'
+    st.markdown("""
+    <style>
+       div[data-testid="stVerticalBlockBorderWrapper"]:has(> div > div[data-testid="stMarkdown"] .panel-title) {
+        background-color: #fdf3e3;
+        border-radius: 18px;
+        padding: 20px;
+    }
+    </style>
+    <div class="left-panel-wrap-inner">
+    """, unsafe_allow_html=True)
 
-        track_cards_html += (
-            '<div class="track-card">'
-            f'{thumb_html}'
-            '<div class="track-info">'
-            f'<p class="track-name">{t["name"]}</p>'
-            f'<p class="track-artist">{t["artist"]}</p>'
-            '<div class="track-tags">'
-            f'<span class="tag tag-bpm">{t["bpm"]} BPM</span>'
-            f'<span class="tag {t["tag_class"]}">{t["energy"]}</span>'
-            '</div>'
-            '</div>'
-            f'<div class="track-time">{t["time"]}</div>'
-            '</div>'
-        )
+    st.markdown('<div class="panel-title">RECENTLY PLAYED</div>', unsafe_allow_html=True)
 
-    left_panel_html = (
-        '<div class="left-panel-wrap">'
-        '<div class="panel-title">RECENTLY PLAYED</div>'
-        f'{track_cards_html}'
-        '</div>'
-    )
-    st.markdown(left_panel_html, unsafe_allow_html=True)
+    for idx, t in enumerate(st.session_state.played_history):
+        col_art, col_info, col_btn = st.columns([1, 4, 1])
+        with col_art:
+            art = t.get('art_url')
+            if art:
+                st.image(art, width=46)
+        with col_info:
+            st.markdown(
+                f"<span style='color:#1a1a2e; font-weight:600;'>{t['track_name']}</span><br>"
+                f"<span style='color:#555; font-size:0.8rem;'>{t['artists']}</span>",
+                unsafe_allow_html=True
+            )
+            if st.button("▶", key=f"play_{idx}_{t['track_id']}"):
+             # Push everything played so far (before this click) into Redis as session history
+               for hist_track in st.session_state.played_history[:idx]:
+                 requests.post(
+                  f"{API_BASE}/session/{st.session_state.session_id}/add_track",
+                    json={
+                   "energy": hist_track['energy'],
+                   "tempo": hist_track['tempo'],
+                   "danceability": hist_track['danceability'],
+                   "valence": hist_track['valence'],
+                   "loudness": hist_track['loudness'],
+                   "skipped": 0,  # we don't actually know if these were skipped; assume played for now
+                   }
+                )
+
+                 st.session_state.current_playing = t
+                 st.session_state.trigger_play_uri = f"spotify:track:{t['track_id']}"
+                 st.rerun()
+
+    
 
 with right_col:
     st.markdown('<div class="panel-title">NEXT TRACK PREDICTION</div>', unsafe_allow_html=True)
 
-    # Now playing card — built as one single string. Icons are inline SVG (not Unicode glyphs)
-    # so they always render regardless of system/browser font support.
-    icon_prev = (
-        '<svg width="16" height="16" viewBox="0 0 24 24" fill="#4a3a73">'
-        '<path d="M6 6h2v12H6zm3.5 6 8.5 6V6z"/></svg>'
-    )
-    icon_next = (
-        '<svg width="16" height="16" viewBox="0 0 24 24" fill="#4a3a73">'
-        '<path d="M16 6h2v12h-2zM6 6l8.5 6L6 18z"/></svg>'
-    )
-    icon_pause = (
-        '<svg width="18" height="18" viewBox="0 0 24 24" fill="#4a3a73">'
-        '<rect x="6" y="5" width="4" height="14" rx="1"/>'
-        '<rect x="14" y="5" width="4" height="14" rx="1"/></svg>'
-    )
-    candidate_art = get_album_art(candidate_track['track_id'])
+    current = st.session_state.current_playing
+    current_art = get_album_art(current['track_id']) or ''
 
-    if candidate_art:
-        album_art_html = f'<img src="{candidate_art}" style="width:100%;height:100%;object-fit:cover;border-radius:10px;" />'
-    else:
-        album_art_html = ''
+    trigger_uri = st.session_state.get('trigger_play_uri', None)
+    st.session_state.trigger_play_uri = None
 
-    now_playing_html = (
-        '<div class="now-playing-card">'
-        '<div class="now-playing-label">CURRENT TRACK (AI PREDICTION)</div>'
-        f'<div class="album-art" style="background:none;">{album_art_html}'
-        f'<div class="album-text-top">{candidate_track["track_name"]}</div>'
-        f'<div class="album-text-bottom">{candidate_track["artists"]}</div>'
-        '</div>'
-        '<div class="progress-track"><div class="progress-fill"></div></div>'
-        '<div class="player-controls">'
-        f'<span class="ctrl-btn">{icon_prev}</span>'
-        f'<div class="play-btn">{icon_pause}</div>'
-        f'<span class="ctrl-btn">{icon_next}</span>'
-        '</div>'
-        '</div>'
-    )
-    st.markdown(now_playing_html, unsafe_allow_html=True)
+    autoplay_js = ""
+    if trigger_uri:
+        autoplay_js = f"""
+        setTimeout(() => {{
+            fetch('http://127.0.0.1:8000/spotify/token')
+                .then(res => res.json())
+                .then(data => {{
+                    if (deviceId) {{
+                        fetch(`https://api.spotify.com/v1/me/player/play?device_id=${{deviceId}}`, {{
+                            method: 'PUT',
+                            headers: {{
+                                'Authorization': 'Bearer ' + data.access_token,
+                                'Content-Type': 'application/json'
+                            }},
+                            body: JSON.stringify({{ uris: ['{trigger_uri}'] }})
+                        }});
+                    }}
+                }});
+        }}, 1500);
+        """
 
-import streamlit.components.v1 as components
+    combined_player_html = f"""
+    <div style="font-family: Arial, sans-serif;">
+        <div style="display:flex; align-items:center; gap:12px; padding:10px; background:#f0eafb; border-radius:10px; margin-bottom:12px;">
+            <img src="{current_art}" style="width:60px;height:60px;border-radius:8px;object-fit:cover;" onerror="this.style.display='none'">
+            <div>
+                <div style="font-weight:bold; font-size:0.95rem;">{current['track_name']}</div>
+                <div style="font-size:0.8rem; color:#666;">{current['artists']}</div>
+            </div>
+        </div>
 
-spotify_player_html = """
-<div id="spotify-status" style="font-family: Arial, sans-serif; font-size: 0.85rem; color: #4a3a73; padding: 8px 0;">
-    Loading Spotify player...
-</div>
-<button id="activateBtn" disabled style="
-    font-size: 0.85rem; padding: 8px 16px; border-radius: 8px; border: none;
-    background: #4a3a73; color: white; cursor: pointer; margin-bottom: 8px;">
-    Activate Player
-</button>
-<div>
-    <button id="prevBtn" disabled>⏮</button>
-    <button id="playPauseBtn" disabled>⏯</button>
-    <button id="nextBtn" disabled>⏭</button>
-</div>
+        <div id="spotify-status" style="font-size: 0.85rem; color: #4a3a73; padding: 8px 0;">
+            Loading Spotify player...
+        </div>
+        <button id="activateBtn" disabled style="
+            font-size: 0.85rem; padding: 8px 16px; border-radius: 8px; border: none;
+            background: #4a3a73; color: white; cursor: pointer; margin-bottom: 8px;">
+            Activate Player
+        </button>
+        <div>
+            <button id="prevBtn" disabled>⏮</button>
+            <button id="playPauseBtn" disabled>⏯</button>
+            <button id="nextBtn" disabled>⏭</button>
+        </div>
+    </div>
 
-<script src="https://sdk.scdn.co/spotify-player.js"></script>
-<script>
-    let player = null;
+    <script src="https://sdk.scdn.co/spotify-player.js"></script>
+    <script>
+        let player = null;
+        let deviceId = null;
 
-    window.onSpotifyWebPlaybackSDKReady = () => {
-        document.getElementById('spotify-status').innerText = "Fetching token...";
+        window.onSpotifyWebPlaybackSDKReady = () => {{
+            document.getElementById('spotify-status').innerText = "Fetching token...";
 
-        fetch('http://127.0.0.1:8000/spotify/token')
-            .then(res => res.json())
-            .then(data => {
-                const token = data.access_token;
-                if (!token) {
-                    document.getElementById('spotify-status').innerText = "No token received.";
-                    return;
-                }
+            fetch('http://127.0.0.1:8000/spotify/token')
+                .then(res => res.json())
+                .then(data => {{
+                    const token = data.access_token;
+                    if (!token) {{
+                        document.getElementById('spotify-status').innerText = "No token received.";
+                        return;
+                    }}
 
-                player = new Spotify.Player({
-                    name: 'SessionFlow AI Player',
-                    getOAuthToken: cb => { cb(token); },
-                    volume: 0.5
-                });
+                    player = new Spotify.Player({{
+                        name: 'SessionFlow AI Player',
+                        getOAuthToken: cb => {{ cb(token); }},
+                        volume: 0.5
+                    }});
 
-                player.addListener('ready', ({ device_id }) => {
-                    document.getElementById('spotify-status').innerText =
-                        "Ready. Click Activate, then select 'SessionFlow AI Player' in Spotify.";
-                    document.getElementById('activateBtn').disabled = false;
-                });
+                    player.addListener('ready', ({{ device_id }}) => {{
+                        deviceId = device_id;
+                        document.getElementById('spotify-status').innerText =
+                            "Ready. Click Activate, then click a track on the left.";
+                        document.getElementById('activateBtn').disabled = false;
+                        {autoplay_js}
+                    }});
 
-                player.addListener('not_ready', () => {
-                    document.getElementById('spotify-status').innerText = "Player offline.";
-                });
+                    player.addListener('player_state_changed', (state) => {{
+                        if (!state) return;
+                        const track = state.track_window.current_track;
+                        document.getElementById('spotify-status').innerText =
+                            track.name + " — " + track.artists.map(a => a.name).join(', ') +
+                            (state.paused ? " (paused)" : " (playing)");
+                        document.getElementById('prevBtn').disabled = false;
+                        document.getElementById('playPauseBtn').disabled = false;
+                        document.getElementById('nextBtn').disabled = false;
+                    }});
 
-                player.addListener('player_state_changed', (state) => {
-                    if (!state) return;
-                    const track = state.track_window.current_track;
-                    document.getElementById('spotify-status').innerText =
-                        track.name + " — " + track.artists.map(a => a.name).join(', ') +
-                        (state.paused ? " (paused)" : " (playing)");
-                    document.getElementById('prevBtn').disabled = false;
-                    document.getElementById('playPauseBtn').disabled = false;
-                    document.getElementById('nextBtn').disabled = false;
-                });
+                    player.addListener('authentication_error', ({{ message }}) => {{
+                        document.getElementById('spotify-status').innerText = "Auth error: " + message;
+                    }});
 
-                player.addListener('authentication_error', ({ message }) => {
-                    document.getElementById('spotify-status').innerText = "Auth error: " + message;
-                });
+                    player.addListener('account_error', ({{ message }}) => {{
+                        document.getElementById('spotify-status').innerText = "Account error: " + message;
+                    }});
 
-                player.addListener('account_error', ({ message }) => {
-                    document.getElementById('spotify-status').innerText = "Account error: " + message;
-                });
+                    player.connect();
+                }});
+        }};
 
-                player.connect();
-            });
-    };
+        document.getElementById('activateBtn').onclick = () => {{
+            if (player) {{
+                player.activateElement();
+                document.getElementById('spotify-status').innerText = "Activated!";
+            }}
+        }};
 
-    document.getElementById('activateBtn').onclick = () => {
-        if (player) {
-            player.activateElement();
-            document.getElementById('spotify-status').innerText =
-                "Activated! Now select 'SessionFlow AI Player' in Spotify.";
-        }
-    };
+        document.getElementById('prevBtn').onclick = () => {{ if (player) player.previousTrack(); }};
+        document.getElementById('playPauseBtn').onclick = () => {{ if (player) player.togglePlay(); }};
+        document.getElementById('nextBtn').onclick = () => {{ if (player) player.nextTrack(); }};
+    </script>
+    """
 
-    document.getElementById('prevBtn').onclick = () => { if (player) player.previousTrack(); };
-    document.getElementById('playPauseBtn').onclick = () => { if (player) player.togglePlay(); };
-    document.getElementById('nextBtn').onclick = () => { if (player) player.nextTrack(); };
-</script>
-"""
+    components.html(combined_player_html, height=280, scrolling=True)
 
-with right_col:
-    components.html(spotify_player_html, height=140)
+
+    if st.button("⏭ Next Random Track", key="next_random_btn"):
+        play_random_next_track()
+        st.rerun()
+
 
 
 

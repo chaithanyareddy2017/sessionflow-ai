@@ -229,6 +229,22 @@ def get_spotify_token():
 
     return {"access_token": token_info['access_token']}
 
+@app.get("/random_track")
+def get_random_track():
+    import pandas as pd
+    df = pd.read_csv('data/cleaned_tracks.csv')
+    row = df.sample(1).iloc[0]
+    return {
+        "track_id": row['track_id'],
+        "track_name": row['track_name'],
+        "artists": row['artists'],
+        "energy": float(row['energy']),
+        "tempo": float(row['tempo']),
+        "danceability": float(row['danceability']),
+        "valence": float(row['valence']),
+        "loudness": float(row['loudness']),
+    }
+
 
 
 
